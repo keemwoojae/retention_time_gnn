@@ -56,18 +56,22 @@ class MTLTrainer:
             task_ids: (B,) tensor
 
         Returns:
-            Normalized labels
+            Normalized labels (on CPU)
         """
-        normalized = labels.clone()
-        unique_tasks = torch.unique(task_ids)
+        # Ensure all tensors are on CPU for indexing
+        labels_cpu = labels.cpu() if labels.is_cuda else labels
+        task_ids_cpu = task_ids.cpu() if task_ids.is_cuda else task_ids
+
+        normalized = labels_cpu.clone()
+        unique_tasks = torch.unique(task_ids_cpu)
 
         for task_id in unique_tasks:
             task_id_val = task_id.item()
             if task_id_val in self.task_means and task_id_val in self.task_stds:
-                mask = task_ids == task_id
+                mask = task_ids_cpu == task_id
                 mean = self.task_means[task_id_val]
                 std = self.task_stds[task_id_val]
-                normalized[mask] = (labels[mask] - mean) / std
+                normalized[mask] = (labels_cpu[mask] - mean) / std
 
         return normalized
 
