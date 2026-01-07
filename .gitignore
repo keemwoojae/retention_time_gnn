@@ -1,1 +1,4 @@
-.vscode\/ndata/
+.vscode/
+__pycache__/
+*.pyc
+
