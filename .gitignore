@@ -1,4 +1,10 @@
 .vscode/
 __pycache__/
 *.pyc
-
+exps/
+model_mtl/
+model_my/
+aggregate_seed_results.py
+reaggregate_seed_results.py
+version.py
+*.sh
