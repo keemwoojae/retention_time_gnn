@@ -97,11 +97,21 @@ def parse_args():
     parser.add_argument('--gpu', type=int, default=0,
                         help='GPU device ID')
 
+    # Aggregate mode
+    parser.add_argument('--aggregate', action='store_true',
+                        help='Aggregate CV results (compute mean/std) instead of training')
+
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    # Aggregate mode: compute mean/std from existing CSV files
+    if args.aggregate:
+        os.makedirs(args.result_dir, exist_ok=True)
+        aggregate_cv_results(args.result_dir, args.tasks)
+        return
 
     # Setup
     torch.manual_seed(args.seed)
@@ -175,11 +185,16 @@ def main():
 
         if args.balanced_batch:
             # Use task-balanced sampling
-            # Note: This requires the full dataset, need to handle subsets
-            train_loader = DataLoader(
+            sampler = TaskBalancedSampler(
                 train_subset,
                 batch_size=min(args.batch_size, train_size),
                 shuffle=True,
+                use_balanced=True
+            )
+            train_loader = DataLoader(
+                train_subset,
+                batch_size=min(args.batch_size, train_size),
+                sampler=sampler,
                 collate_fn=collate_mtl_graphs,
                 drop_last=True
             )
@@ -200,6 +215,7 @@ def main():
         )
 
         print(f'Train/Val split: {train_size}/{val_size}')
+        print(f'Balanced sampling: {args.balanced_batch}')
 
     else:  # lbfgs
         train_loader = DataLoader(
@@ -305,11 +321,11 @@ def save_results(args, task_names, task_metrics, overall_mae, overall_medae, ove
         writer = csv.writer(f)
 
         if not file_exists:
-            writer.writerow(['Tasks', 'N_Tasks', 'CV_Fold', 'Method', 'Optimizer',
+            writer.writerow(['Tasks', 'N_Tasks', 'CV_Fold', 'Seed', 'Method', 'Optimizer',
                            'MAE', 'MedAE', 'R2'])
 
         writer.writerow([
-            '+'.join(task_names), len(task_names), args.cvid,
+            '+'.join(task_names), len(task_names), args.cvid, args.seed,
             args.method, args.opt, overall_mae, overall_medae, overall_r2
         ])
 
@@ -324,16 +340,104 @@ def save_results(args, task_names, task_metrics, overall_mae, overall_medae, ove
             writer = csv.writer(f)
 
             if not file_exists:
-                writer.writerow(['Task', 'CV_Fold', 'Method', 'Optimizer',
+                writer.writerow(['Task', 'CV_Fold', 'Seed', 'Method', 'Optimizer',
                                'N_Samples', 'MAE', 'MedAE', 'R2', 'Joint_Tasks'])
 
             writer.writerow([
-                task_name, args.cvid, args.method, args.opt,
+                task_name, args.cvid, args.seed, args.method, args.opt,
                 metrics['n_samples'], metrics['MAE'], metrics['MedAE'], metrics['R2'],
                 '+'.join(task_names)
             ])
 
     print(f'Per-task results saved to {args.result_dir}')
+
+
+def aggregate_cv_results(result_dir, task_names):
+    """Aggregate CV results by computing mean and std for each task."""
+    import pandas as pd
+
+    print(f'\n{"="*60}')
+    print('AGGREGATING CV RESULTS')
+    print(f'{"="*60}')
+
+    # Aggregate per-task results
+    for task_name in task_names:
+        task_file = os.path.join(result_dir, f'mtl_{task_name}.csv')
+
+        if not os.path.exists(task_file):
+            print(f'[Warning] File not found: {task_file}')
+            continue
+
+        df = pd.read_csv(task_file)
+
+        # Filter only numeric CV folds (exclude already added mean/std rows)
+        df_cv = df[df['CV_Fold'].apply(lambda x: str(x).isdigit())]
+
+        if len(df_cv) == 0:
+            print(f'[Warning] No CV results found in {task_file}')
+            continue
+
+        # Compute mean and std
+        metrics_cols = ['MAE', 'MedAE', 'R2']
+        mean_vals = df_cv[metrics_cols].mean()
+        std_vals = df_cv[metrics_cols].std()
+
+        # Get common values from first row
+        first_row = df_cv.iloc[0]
+
+        # Append mean and std rows
+        with open(task_file, mode='a', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                task_name, 'mean', first_row['Method'], first_row['Optimizer'],
+                int(df_cv['N_Samples'].mean()),
+                f'{mean_vals["MAE"]:.4f}', f'{mean_vals["MedAE"]:.4f}', f'{mean_vals["R2"]:.4f}',
+                first_row['Joint_Tasks']
+            ])
+            writer.writerow([
+                task_name, 'std', first_row['Method'], first_row['Optimizer'],
+                '-',
+                f'{std_vals["MAE"]:.4f}', f'{std_vals["MedAE"]:.4f}', f'{std_vals["R2"]:.4f}',
+                first_row['Joint_Tasks']
+            ])
+
+        print(f'{task_name}: MAE={mean_vals["MAE"]:.4f}±{std_vals["MAE"]:.4f}, '
+              f'MedAE={mean_vals["MedAE"]:.4f}±{std_vals["MedAE"]:.4f}, '
+              f'R2={mean_vals["R2"]:.4f}±{std_vals["R2"]:.4f}')
+
+    # Aggregate overall results
+    overall_file = os.path.join(result_dir, 'mtl_overall.csv')
+    if os.path.exists(overall_file):
+        df = pd.read_csv(overall_file)
+        df_cv = df[df['CV_Fold'].apply(lambda x: str(x).isdigit())]
+
+        if len(df_cv) > 0:
+            metrics_cols = ['MAE', 'MedAE', 'R2']
+            mean_vals = df_cv[metrics_cols].mean()
+            std_vals = df_cv[metrics_cols].std()
+
+            first_row = df_cv.iloc[0]
+
+            with open(overall_file, mode='a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    first_row['Tasks'], first_row['N_Tasks'], 'mean',
+                    first_row['Method'], first_row['Optimizer'],
+                    f'{mean_vals["MAE"]:.4f}', f'{mean_vals["MedAE"]:.4f}', f'{mean_vals["R2"]:.4f}'
+                ])
+                writer.writerow([
+                    first_row['Tasks'], first_row['N_Tasks'], 'std',
+                    first_row['Method'], first_row['Optimizer'],
+                    f'{std_vals["MAE"]:.4f}', f'{std_vals["MedAE"]:.4f}', f'{std_vals["R2"]:.4f}'
+                ])
+
+            print(f'\nOverall: MAE={mean_vals["MAE"]:.4f}±{std_vals["MAE"]:.4f}, '
+                  f'MedAE={mean_vals["MedAE"]:.4f}±{std_vals["MedAE"]:.4f}, '
+                  f'R2={mean_vals["R2"]:.4f}±{std_vals["R2"]:.4f}')
+
+    print(f'\n{"="*60}')
+    print('AGGREGATION COMPLETE')
+    print(f'{"="*60}')
 
 
 if __name__ == '__main__':

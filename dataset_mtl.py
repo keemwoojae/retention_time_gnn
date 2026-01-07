@@ -157,26 +157,60 @@ class TaskBalancedSampler(torch.utils.data.Sampler):
     Can be used for stratified batching.
     """
 
-    def __init__(self, dataset, batch_size, shuffle=True):
+    def __init__(self, dataset, batch_size, shuffle=True, use_balanced=True):
         """
         Args:
-            dataset: MTLDataset instance
+            dataset: MTLDataset instance or Subset of MTLDataset
             batch_size: Total batch size
             shuffle: Whether to shuffle samples within each task
+            use_balanced: If True, balance samples across tasks (may oversample small tasks).
+                          If False, use simple sequential/shuffled sampling without balancing.
         """
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.use_balanced = use_balanced
 
-        # Get indices for each task
-        self.task_indices = {}
-        for task_id in range(dataset.n_tasks):
-            self.task_indices[task_id] = dataset.get_task_indices(task_id)
+        # Handle Subset objects (e.g., from random_split)
+        if isinstance(dataset, torch.utils.data.Subset):
+            base_dataset = dataset.dataset
+            subset_indices = dataset.indices
+            self.n_tasks = base_dataset.n_tasks
+
+            # Create mapping: original index -> subset index
+            orig_to_subset = {orig_idx: subset_idx for subset_idx, orig_idx in enumerate(subset_indices)}
+
+            # Get task indices mapped to subset indices
+            self.task_indices = {}
+            for task_id in range(self.n_tasks):
+                orig_task_indices = base_dataset.get_task_indices(task_id)
+                # Filter to subset and map to subset indices
+                subset_task_indices = [orig_to_subset[i] for i in orig_task_indices if i in orig_to_subset]
+                self.task_indices[task_id] = np.array(subset_task_indices)
+        else:
+            # Direct MTLDataset
+            self.n_tasks = dataset.n_tasks
+            self.task_indices = {}
+            for task_id in range(dataset.n_tasks):
+                self.task_indices[task_id] = dataset.get_task_indices(task_id)
 
         # Calculate samples per task per batch
-        self.samples_per_task = batch_size // dataset.n_tasks
+        self.samples_per_task = batch_size // self.n_tasks
 
     def __iter__(self):
+        if not self.use_balanced:
+            return self._iter_simple()
+        return self._iter_balanced()
+
+    def _iter_simple(self):
+        """Simple sampling: just shuffle all indices without balancing."""
+        all_indices = np.arange(len(self.dataset))
+        if self.shuffle:
+            np.random.shuffle(all_indices)
+        return iter(all_indices.tolist())
+
+    def _iter_balanced(self):
+        """Balanced sampling: ensure equal representation from each task."""
         # Shuffle within each task if needed
         if self.shuffle:
             task_indices = {
@@ -188,11 +222,11 @@ class TaskBalancedSampler(torch.utils.data.Sampler):
 
         # Create balanced batches
         indices = []
-        task_ptrs = {k: 0 for k in range(self.dataset.n_tasks)}
+        task_ptrs = {k: 0 for k in range(self.n_tasks)}
 
         while True:
             batch = []
-            for task_id in range(self.dataset.n_tasks):
+            for task_id in range(self.n_tasks):
                 ptr = task_ptrs[task_id]
                 task_idx = task_indices[task_id]
 
