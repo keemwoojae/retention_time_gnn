@@ -55,7 +55,7 @@ class MTLDataset:
             [mol_dict] = np.load(data_path, allow_pickle=True)['data']
 
             # Cross-validation split
-            kf = KFold(n_splits=self.n_splits, random_state=134, shuffle=True)
+            kf = KFold(n_splits=self.n_splits, random_state=self.seed, shuffle=True)
             cv_splits = [split for split in kf.split(range(len(mol_dict['label'])))]
             cv_splits = cv_splits[self.cv_id]
 
