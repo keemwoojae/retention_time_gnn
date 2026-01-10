@@ -5,7 +5,7 @@ gnn/__pycache__/
 exps/
 model_mtl/
 model_my/
-aggregate_seed_results.py
-reaggregate_seed_results.py
+aggregate.py
+aggregate_legacy.py
 version.py
 *.sh
