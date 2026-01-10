@@ -305,11 +305,11 @@ def save_results(args, task_names, task_metrics, overall_mae, overall_medae, ove
         writer = csv.writer(f)
 
         if not file_exists:
-            writer.writerow(['Tasks', 'N_Tasks', 'CV_Fold', 'Method', 'Optimizer',
+            writer.writerow(['Tasks', 'N_Tasks', 'CV_Fold', 'Seed', 'Method', 'Optimizer',
                            'MAE', 'MedAE', 'R2'])
 
         writer.writerow([
-            '+'.join(task_names), len(task_names), args.cvid,
+            '+'.join(task_names), len(task_names), args.cvid, args.seed,
             args.method, args.opt, overall_mae, overall_medae, overall_r2
         ])
 
@@ -324,11 +324,11 @@ def save_results(args, task_names, task_metrics, overall_mae, overall_medae, ove
             writer = csv.writer(f)
 
             if not file_exists:
-                writer.writerow(['Task', 'CV_Fold', 'Method', 'Optimizer',
+                writer.writerow(['Task', 'CV_Fold', 'Seed', 'Method', 'Optimizer',
                                'N_Samples', 'MAE', 'MedAE', 'R2', 'Joint_Tasks'])
 
             writer.writerow([
-                task_name, args.cvid, args.method, args.opt,
+                task_name, args.cvid, args.seed, args.method, args.opt,
                 metrics['n_samples'], metrics['MAE'], metrics['MedAE'], metrics['R2'],
                 '+'.join(task_names)
             ])
