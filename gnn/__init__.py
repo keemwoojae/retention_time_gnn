@@ -6,3 +6,4 @@ from .gin_predictor import *
 from .gtn_predictor import *
 from .gat_predictor import *
 from .gin_mtl_predictor import *
+from .gin_single_predictor import *
