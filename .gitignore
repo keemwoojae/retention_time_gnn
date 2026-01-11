@@ -3,6 +3,7 @@ __pycache__/
 gnn/__pycache__/
 *.pyc
 exps/
+exps_results/
 model_mtl/
 model_my/
 aggregate.py
